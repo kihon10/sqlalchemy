@@ -68,6 +68,9 @@ class SchemaItem(SchemaEventTarget, visitors.Visitable):
 
     __visit_name__ = 'schema_item'
 
+    def _execute_on_connection(self, connection, multiparams, params):
+        return connection._execute_default(self, multiparams, params)
+
     def _init_items(self, *args):
         """Initialize the list of child items for this SchemaItem."""
 
@@ -105,6 +108,11 @@ class SchemaItem(SchemaEventTarget, visitors.Visitable):
         """
         return {}
 
+    def _schema_item_copy(self, schema_item):
+        if 'info' in self.__dict__:
+            schema_item.info = self.info.copy()
+        schema_item.dispatch._update(self.dispatch)
+        return schema_item
 
 
 class Table(SchemaItem, TableClause):
@@ -715,8 +723,7 @@ class Table(SchemaItem, TableClause):
                   unique=index.unique,
                   *[table.c[col] for col in index.columns.keys()],
                   **index.kwargs)
-        table.dispatch._update(self.dispatch)
-        return table
+        return self._schema_item_copy(table)
 
 
 class Column(SchemaItem, ColumnClause):
@@ -974,8 +981,13 @@ class Column(SchemaItem, ColumnClause):
         self.default = kwargs.pop('default', None)
         self.server_default = kwargs.pop('server_default', None)
         self.server_onupdate = kwargs.pop('server_onupdate', None)
+
+        # these default to None because .index and .unique is *not*
+        # an informational flag about Column - there can still be an
+        # Index or UniqueConstraint referring to this Column.
         self.index = kwargs.pop('index', None)
         self.unique = kwargs.pop('unique', None)
+
         self.system = kwargs.pop('system', False)
         self.doc = kwargs.pop('doc', None)
         self.onupdate = kwargs.pop('onupdate', None)
@@ -1123,7 +1135,7 @@ class Column(SchemaItem, ColumnClause):
                     "To create indexes with a specific name, create an "
                     "explicit Index object external to the Table.")
             Index(_truncated_label('ix_%s' % self._label),
-                                    self, unique=self.unique)
+                                    self, unique=bool(self.unique))
         elif self.unique:
             if isinstance(self.unique, util.string_types):
                 raise exc.ArgumentError(
@@ -1175,12 +1187,10 @@ class Column(SchemaItem, ColumnClause):
                 server_default=self.server_default,
                 onupdate=self.onupdate,
                 server_onupdate=self.server_onupdate,
-                info=self.info,
                 doc=self.doc,
                 *args
                 )
-        c.dispatch._update(self.dispatch)
-        return c
+        return self._schema_item_copy(c)
 
     def _make_proxy(self, selectable, name=None, key=None,
                             name_is_truncatable=False, **kw):
@@ -1276,7 +1286,6 @@ class ForeignKey(SchemaItem):
 
     def __init__(self, column, _constraint=None, use_alter=False, name=None,
                     onupdate=None, ondelete=None, deferrable=None,
-                    schema=None,
                     initially=None, link_to_name=False, match=None):
         """
         Construct a column-level FOREIGN KEY.
@@ -1377,8 +1386,7 @@ class ForeignKey(SchemaItem):
                 link_to_name=self.link_to_name,
                 match=self.match
                 )
-        fk.dispatch._update(self.dispatch)
-        return fk
+        return self._schema_item_copy(fk)
 
     def _get_colspec(self, schema=None):
         """Return a string based 'column specification' for this
@@ -1774,7 +1782,7 @@ class ColumnDefault(DefaultGenerator):
         on everyone.
 
         """
-        if inspect.isfunction(fn):
+        if inspect.isfunction(fn) or inspect.ismethod(fn):
             inspectable = fn
         elif inspect.isclass(fn):
             inspectable = fn.__init__
@@ -2221,8 +2229,7 @@ class ColumnCollectionConstraint(ColumnCollectionMixin, Constraint):
     def copy(self, **kw):
         c = self.__class__(name=self.name, deferrable=self.deferrable,
                               initially=self.initially, *self.columns.keys())
-        c.dispatch._update(self.dispatch)
-        return c
+        return self._schema_item_copy(c)
 
     def contains_column(self, col):
         return self.columns.contains_column(col)
@@ -2303,8 +2310,7 @@ class CheckConstraint(Constraint):
                                 _create_rule=self._create_rule,
                                 table=target_table,
                                 _autoattach=False)
-        c.dispatch._update(self.dispatch)
-        return c
+        return self._schema_item_copy(c)
 
 
 class ForeignKeyConstraint(Constraint):
@@ -2394,7 +2400,9 @@ class ForeignKeyConstraint(Constraint):
                     ondelete=self.ondelete,
                     use_alter=self.use_alter,
                     link_to_name=self.link_to_name,
-                    match=self.match
+                    match=self.match,
+                    deferrable=self.deferrable,
+                    initially=self.initially
                 )
 
         if table is not None:
@@ -2473,8 +2481,11 @@ class ForeignKeyConstraint(Constraint):
                     link_to_name=self.link_to_name,
                     match=self.match
                 )
-        fkc.dispatch._update(self.dispatch)
-        return fkc
+        for self_fk, other_fk in zip(
+                                self._elements.values(),
+                                fkc._elements.values()):
+            self_fk._schema_item_copy(other_fk)
+        return self._schema_item_copy(fkc)
 
 
 class PrimaryKeyConstraint(ColumnCollectionConstraint):
@@ -2598,14 +2609,15 @@ class Index(ColumnCollectionMixin, SchemaItem):
                     columns.append(expr)
 
         self.expressions = expressions
+        self.name = quoted_name(name, kw.pop("quote", None))
+        self.unique = kw.pop('unique', False)
+        self.kwargs = kw
 
         # will call _set_parent() if table-bound column
         # objects are present
         ColumnCollectionMixin.__init__(self, *columns)
 
-        self.name = quoted_name(name, kw.pop("quote", None))
-        self.unique = kw.pop('unique', False)
-        self.kwargs = kw
+
 
     def _set_parent(self, table):
         ColumnCollectionMixin._set_parent(self, table)

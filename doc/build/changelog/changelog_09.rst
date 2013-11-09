@@ -10,7 +10,238 @@
     .. include:: changelog_07.rst
 
 .. changelog::
-    :version: 0.9.0
+    :version: 0.9.0b1
+    :released: October 26, 2013
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 2810
+
+        The association proxy now returns ``None`` when fetching a scalar
+        attribute off of a scalar relationship, where the scalar relationship
+        itself points to ``None``, instead of raising an ``AttributeError``.
+
+        .. seealso::
+
+            :ref:`migration_2810`
+
+    .. change::
+        :tags: feature, sql, postgresql, mysql
+        :tickets: 2183
+
+        The Postgresql and MySQL dialects now support reflection/inspection
+        of foreign key options, including ON UPDATE, ON DELETE.  Postgresql
+        also reflects MATCH, DEFERRABLE, and INITIALLY.  Coutesy ijl.
+
+    .. change::
+        :tags: bug, mysql
+        :tickets: 2839
+
+        Fix and test parsing of MySQL foreign key options within reflection;
+        this complements the work in :ticket:`2183` where we begin to support
+        reflection of foreign key options such as ON UPDATE/ON DELETE
+        cascade.
+
+    .. change::
+        :tags: bug, orm
+        :tickets: 2787
+
+        :func:`.attributes.get_history()` when used with a scalar column-mapped
+        attribute will now honor the "passive" flag
+        passed to it; as this defaults to ``PASSIVE_OFF``, the function will
+        by default query the database if the value is not present.
+        This is a behavioral change vs. 0.8.
+
+        .. seealso::
+
+            :ref:`change_2787`
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 2787
+
+        Added new method :meth:`.AttributeState.load_history`, works like
+        :attr:`.AttributeState.history` but also fires loader callables.
+
+        .. seealso::
+
+            :ref:`change_2787`
+
+
+    .. change::
+        :tags: feature, sql
+        :tickets: 2850
+
+        A :func:`.bindparam` construct with a "null" type (e.g. no type
+        specified) is now copied when used in a typed expression, and the
+        new copy is assigned the actual type of the compared column.  Previously,
+        this logic would occur on the given :func:`.bindparam` in place.
+        Additionally, a similar process now occurs for :func:`.bindparam` constructs
+        passed to :meth:`.ValuesBase.values` for an :class:`.Insert` or
+        :class:`.Update` construct, within the compilation phase of the
+        construct.
+
+        These are both subtle behavioral changes which may impact some
+        usages.
+
+        .. seealso::
+
+            :ref:`migration_2850`
+
+    .. change::
+        :tags: feature, sql
+        :tickets: 2804, 2823, 2734
+
+        An overhaul of expression handling for special symbols particularly
+        with conjunctions, e.g.
+        ``None`` :func:`.expression.null` :func:`.expression.true`
+        :func:`.expression.false`, including consistency in rendering NULL
+        in conjunctions, "short-circuiting" of :func:`.and_` and :func:`.or_`
+        expressions which contain boolean constants, and rendering of
+        boolean constants and expressions as compared to "1" or "0" for backends
+        that don't feature ``true``/``false`` constants.
+
+        .. seealso::
+
+            :ref:`migration_2804`
+
+    .. change::
+        :tags: feature, sql
+        :tickets: 2838
+
+        The typing system now handles the task of rendering "literal bind" values,
+        e.g. values that are normally bound parameters but due to context must
+        be rendered as strings, typically within DDL constructs such as
+        CHECK constraints and indexes (note that "literal bind" values
+        become used by DDL as of :ticket:`2742`).  A new method
+        :meth:`.TypeEngine.literal_processor` serves as the base, and
+        :meth:`.TypeDecorator.process_literal_param` is added to allow wrapping
+        of a native literal rendering method.
+
+        .. seealso::
+
+            :ref:`change_2838`
+
+    .. change::
+        :tags: feature, sql
+        :tickets: 2716
+
+        The :meth:`.Table.tometadata` method now produces copies of
+        all :attr:`.SchemaItem.info` dictionaries from all :class:`.SchemaItem`
+        objects within the structure including columns, constraints,
+        foreign keys, etc.   As these dictionaries
+        are copies, they are independent of the original dictionary.
+        Previously, only the ``.info`` dictionary of :class:`.Column` was transferred
+        within this operation, and it was only linked in place, not copied.
+
+    .. change::
+        :tags: feature, postgresql
+        :tickets: 2840
+
+        Added support for rendering ``SMALLSERIAL`` when a :class:`.SmallInteger`
+        type is used on a primary key autoincrement column, based on server
+        version detection of Postgresql version 9.2 or greater.
+
+    .. change::
+        :tags: feature, mysql
+        :tickets: 2817
+
+        The MySQL :class:`.mysql.SET` type now features the same auto-quoting
+        behavior as that of :class:`.mysql.ENUM`.  Quotes are not required when
+        setting up the value, but quotes that are present will be auto-detected
+        along with a warning.  This also helps with Alembic where
+        the SET type doesn't render with quotes.
+
+    .. change::
+        :tags: feature, sql
+
+        The ``default`` argument of :class:`.Column` now accepts a class
+        or object method as an argument, in addition to a standalone function;
+        will properly detect if the "context" argument is accepted or not.
+
+    .. change::
+        :tags: bug, sql
+        :tickets: 2835
+
+        The "name" attribute is set on :class:`.Index` before the "attach"
+        events are called, so that attachment events can be used to dynamically
+        generate a name for the index based on the parent table and/or
+        columns.
+
+    .. change::
+        :tags: bug, engine
+        :tickets: 2748
+
+        The method signature of :meth:`.Dialect.reflecttable`, which in
+        all known cases is provided by :class:`.DefaultDialect`, has been
+        tightened to expect ``include_columns`` and ``exclude_columns``
+        arguments without any kw option, reducing ambiguity - previously
+        ``exclude_columns`` was missing.
+
+    .. change::
+        :tags: bug, sql
+        :tickets: 2831
+
+        The erroneous kw arg "schema" has been removed from the :class:`.ForeignKey`
+        object. this was an accidental commit that did nothing; a warning is raised
+        in 0.8.3 when this kw arg is used.
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 1418
+
+        Added a new load option :func:`.orm.load_only`.  This allows a series
+        of column names to be specified as loading "only" those attributes,
+        deferring the rest.
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 1418
+
+        The system of loader options has been entirely rearchitected to build
+        upon a much more comprehensive base, the :class:`.Load` object.  This
+        base allows any common loader option like :func:`.joinedload`,
+        :func:`.defer`, etc. to be used in a "chained" style for the purpose
+        of specifying options down a path, such as ``joinedload("foo").subqueryload("bar")``.
+        The new system supersedes the usage of dot-separated path names,
+        multiple attributes within options, and the usage of ``_all()`` options.
+
+        .. seealso::
+
+            :ref:`feature_1418`
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 2824
+
+        The :func:`.composite` construct now maintains the return object
+        when used in a column-oriented :class:`.Query`, rather than expanding
+        out into individual columns.  This makes use of the new :class:`.Bundle`
+        feature internally.  This behavior is backwards incompatible; to
+        select from a composite column which will expand out, use
+        ``MyClass.some_composite.clauses``.
+
+        .. seealso::
+
+            :ref:`migration_2824`
+
+    .. change::
+        :tags: feature, orm
+        :tickets: 2824
+
+        A new construct :class:`.Bundle` is added, which allows for specification
+        of groups of column expressions to a :class:`.Query` construct.
+        The group of columns are returned as a single tuple by default.  The
+        behavior of :class:`.Bundle` can be overridden however to provide
+        any sort of result processing to the returned row.  The behavior
+        of :class:`.Bundle` is also embedded into composite attributes now
+        when they are used in a column-oriented :class:`.Query`.
+
+        .. seealso::
+
+            :ref:`change_2824`
+
+            :ref:`migration_2824`
 
     .. change::
         :tags: bug, sql

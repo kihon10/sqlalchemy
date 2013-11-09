@@ -310,22 +310,74 @@ separately when it is accessed::
         photo3 = deferred(Column(Binary), group='photos')
 
 You can defer or undefer columns at the :class:`~sqlalchemy.orm.query.Query`
-level using the :func:`.orm.defer` and :func:`.orm.undefer` query options::
+level using options, including :func:`.orm.defer` and :func:`.orm.undefer`::
 
     from sqlalchemy.orm import defer, undefer
 
     query = session.query(Book)
-    query.options(defer('summary')).all()
-    query.options(undefer('excerpt')).all()
+    query = query.options(defer('summary'))
+    query = query.options(undefer('excerpt'))
+    query.all()
 
-And an entire "deferred group", i.e. which uses the ``group`` keyword argument
-to :func:`.orm.deferred`, can be undeferred using
-:func:`.orm.undefer_group`, sending in the group name::
+:func:`.orm.deferred` attributes which are marked with a "group" can be undeferred
+using :func:`.orm.undefer_group`, sending in the group name::
 
     from sqlalchemy.orm import undefer_group
 
     query = session.query(Book)
     query.options(undefer_group('photos')).all()
+
+Load Only Cols
+---------------
+
+An arbitrary set of columns can be selected as "load only" columns, which will
+be loaded while deferring all other columns on a given entity, using :func:`.orm.load_only`::
+
+    from sqlalchemy.orm import load_only
+
+    session.query(Book).options(load_only("summary", "excerpt"))
+
+.. versionadded:: 0.9.0
+
+Deferred Loading with Multiple Entities
+---------------------------------------
+
+To specify column deferral options within a :class:`.Query` that loads multiple types
+of entity, the :class:`.Load` object can specify which parent entity to start with::
+
+    from sqlalchemy.orm import Load
+
+    query = session.query(Book, Author).join(Book.author)
+    query = query.options(
+                Load(Book).load_only("summary", "excerpt"),
+                Load(Author).defer("bio")
+            )
+
+To specify column deferral options along the path of various relationships,
+the options support chaining, where the loading style of each relationship
+is specified first, then is chained to the deferral options.  Such as, to load
+``Book`` instances, then joined-eager-load the ``Author``, then apply deferral
+options to the ``Author`` entity::
+
+    from sqlalchemy.orm import joinedload
+
+    query = session.query(Book)
+    query = query.options(
+                joinedload(Book.author).load_only("summary", "excerpt"),
+            )
+
+In the case where the loading style of parent relationships should be left
+unchanged, use :func:`.orm.defaultload`::
+
+    from sqlalchemy.orm import defaultload
+
+    query = session.query(Book)
+    query = query.options(
+                defaultload(Book.author).load_only("summary", "excerpt"),
+            )
+
+.. versionadded:: 0.9.0 support for :class:`.Load` and other options which
+   allow for better targeting of deferral options.
 
 Column Deferral API
 -------------------
@@ -333,6 +385,8 @@ Column Deferral API
 .. autofunction:: deferred
 
 .. autofunction:: defer
+
+.. autofunction:: load_only
 
 .. autofunction:: undefer
 
@@ -772,6 +826,10 @@ class you provide.
     in-place mutation is no longer automatic; see the section below on
     enabling mutability to support tracking of in-place changes.
 
+.. versionchanged:: 0.9
+    Composites will return their object-form, rather than as individual columns,
+    when used in a column-oriented :class:`.Query` construct.  See :ref:`migration_2824`.
+
 A simple example represents pairs of columns as a ``Point`` object.
 ``Point`` represents such a pair as ``.x`` and ``.y``::
 
@@ -910,6 +968,54 @@ the same expression that the base "greater than" does::
                             comparator_factory=PointComparator)
         end = composite(Point, x2, y2,
                             comparator_factory=PointComparator)
+
+.. _bundles:
+
+Column Bundles
+===============
+
+The :class:`.Bundle` may be used to query for groups of columns under one
+namespace.
+
+.. versionadded:: 0.9.0
+
+The bundle allows columns to be grouped together::
+
+    from sqlalchemy.orm import Bundle
+
+    bn = Bundle('mybundle', MyClass.data1, MyClass.data2)
+    for row in session.query(bn).filter(bn.c.data1 == 'd1'):
+        print row.mybundle.data1, row.mybundle.data2
+
+The bundle can be subclassed to provide custom behaviors when results
+are fetched.  The method :meth:`.Bundle.create_row_processor` is given
+the :class:`.Query` and a set of "row processor" functions at query execution
+time; these processor functions when given a result row will return the
+individual attribute value, which can then be adapted into any kind of
+return data structure.  Below illustrates replacing the usual :class:`.KeyedTuple`
+return structure with a straight Python dictionary::
+
+    from sqlalchemy.orm import Bundle
+
+    class DictBundle(Bundle):
+        def create_row_processor(self, query, procs, labels):
+            """Override create_row_processor to return values as dictionaries"""
+            def proc(row, result):
+                return dict(
+                            zip(labels, (proc(row, result) for proc in procs))
+                        )
+            return proc
+
+A result from the above bundle will return dictionary values::
+
+    bn = DictBundle('mybundle', MyClass.data1, MyClass.data2)
+    for row in session.query(bn).filter(bn.c.data1 == 'd1'):
+        print row.mybundle['data1'], row.mybundle['data2']
+
+The :class:`.Bundle` construct is also integrated into the behavior
+of :func:`.composite`, where it is used to return composite attributes as objects
+when queried as individual attributes.
+
 
 .. _maptojoin:
 
